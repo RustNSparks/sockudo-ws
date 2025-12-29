@@ -17,6 +17,8 @@ Benchmarked against [uWebSockets](https://github.com/uNetworking/uWebSockets), t
 | 512 bytes, 500 connections | 231,135 msg/s | 222,493 msg/s | **1.03x** |
 | 1024 bytes, 500 connections | 222,578 msg/s | 216,833 msg/s | **1.02x** |
 
+*Benchmarked on AMD Ryzen 9 7950X, 32GB RAM, Linux 6.18*
+
 sockudo-ws matches or exceeds uWebSockets performance while providing a safe, ergonomic Rust API.
 
 ## Features
