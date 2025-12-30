@@ -2,7 +2,7 @@
 name = "sockudo-ws"
 version = "1.2.0"
 edition = "2024"
-authors = ["HFT WebSocket Library"]
+authors = ["Diaconu Radu-Mihai"]
 description = "Ultra-low latency WebSocket library for HFT applications"
 license = "MIT"
 
