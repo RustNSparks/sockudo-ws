@@ -174,10 +174,10 @@ impl H3HandshakeRequest {
         }
 
         // sec-websocket-version should be 13 if present
-        if let Some(ref version) = self.version {
-            if version != "13" {
-                return Err(StatusCode::BAD_REQUEST);
-            }
+        if let Some(ref version) = self.version
+            && version != "13"
+        {
+            return Err(StatusCode::BAD_REQUEST);
         }
 
         Ok(())
