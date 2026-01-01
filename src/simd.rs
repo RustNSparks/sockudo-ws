@@ -139,7 +139,8 @@ fn apply_mask_scalar_offset(data: &mut [u8], mask: [u8; 4], offset: usize) {
     let mut mask_idx = offset & 3;
 
     // Handle unaligned prefix to get to 8-byte alignment
-    while i < len && (i + mask_idx) & 7 != 0 {
+    let ptr_addr = data.as_ptr() as usize;
+    while i < len && (ptr_addr + i) & 7 != 0 {
         data[i] ^= mask[mask_idx];
         mask_idx = (mask_idx + 1) & 3;
         i += 1;
@@ -160,7 +161,7 @@ fn apply_mask_scalar_offset(data: &mut [u8], mask: [u8; 4], offset: usize) {
         ]);
 
         while i + 8 <= len {
-            // SAFETY: We checked that i + 8 <= len
+            // SAFETY: We checked that i + 8 <= len and the pointer is aligned to 8 bytes
             unsafe {
                 let ptr = data.as_mut_ptr().add(i) as *mut u64;
                 *ptr ^= mask_u64;
