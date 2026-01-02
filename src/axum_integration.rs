@@ -348,6 +348,29 @@ impl WebSocket {
     pub fn is_closed(&self) -> bool {
         self.inner.is_closed()
     }
+
+    /// Split the WebSocket into separate reader and writer halves
+    ///
+    /// This allows reading and writing from separate tasks.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let (mut reader, mut writer) = socket.split();
+    ///
+    /// // Spawn reader task
+    /// tokio::spawn(async move {
+    ///     while let Some(msg) = reader.recv().await {
+    ///         // Handle message
+    ///     }
+    /// });
+    ///
+    /// // Write from current task
+    /// writer.send(Message::Text("Hello".into())).await?;
+    /// ```
+    pub fn split(self) -> (SplitReader<UpgradedStream>, SplitWriter<UpgradedStream>) {
+        self.inner.split()
+    }
 }
 
 impl Stream for WebSocket {
