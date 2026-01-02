@@ -226,10 +226,10 @@ impl ExtendedConnectRequest {
         }
 
         // sec-websocket-version should be 13 if present
-        if let Some(ref version) = self.version {
-            if version != "13" {
-                return Err(StatusCode::BAD_REQUEST);
-            }
+        if let Some(ref version) = self.version
+            && version != "13"
+        {
+            return Err(StatusCode::BAD_REQUEST);
         }
 
         Ok(())
@@ -342,12 +342,11 @@ impl ExtendedConnectConfig {
         request.validate()?;
 
         // Check WebSocket version if required
-        if let Some(required_version) = self.required_version {
-            if let Some(ref version) = request.version {
-                if version != required_version {
-                    return Err(StatusCode::BAD_REQUEST);
-                }
-            }
+        if let Some(required_version) = self.required_version
+            && let Some(ref version) = request.version
+            && version != required_version
+        {
+            return Err(StatusCode::BAD_REQUEST);
         }
 
         // Check origin if allowed_origins is not empty

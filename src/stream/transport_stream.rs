@@ -59,6 +59,8 @@ pub struct Stream<T: Transport> {
 }
 
 // Internal enum holding the actual stream implementation
+// Allow large enum variant - Http3StreamInner is large but boxing would add indirection overhead
+#[allow(clippy::large_enum_variant)]
 enum StreamInner {
     // HTTP/1.1: Any AsyncRead + AsyncWrite stream (boxed for type erasure)
     Http1(Box<dyn Http1Stream>),
