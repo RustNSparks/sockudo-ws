@@ -35,7 +35,7 @@ nightly = []
 tokio-runtime = ["tokio", "tokio-util"]
 
 # Framework integrations
-axum-integration = ["axum", "tokio-runtime"]
+axum-integration = ["axum", "hyper", "hyper-util", "tokio-runtime"]
 
 # Compression (permessage-deflate, RFC 7692)
 permessage-deflate = ["flate2"]
@@ -94,6 +94,8 @@ tokio-util = { version = "^0.7", features = ["codec"], optional = true }
 
 # Axum integration
 axum = { version = "^0.8", optional = true }
+hyper = { version = "^1.0", optional = true }
+hyper-util = { version = "^0.1", features = ["tokio"], optional = true }
 
 # HTTP parsing
 httparse = "^1.9"

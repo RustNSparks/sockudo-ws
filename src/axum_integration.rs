@@ -38,11 +38,12 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use axum::body::Body;
-use axum::extract::FromRequestParts;
-use axum::http::{Method, Response, StatusCode, header, request::Parts};
+use axum::http::{Method, Response, StatusCode, header};
 use axum::response::IntoResponse;
 use futures_core::Stream;
 use futures_sink::Sink;
+use hyper::upgrade::OnUpgrade;
+use hyper_util::rt::TokioIo;
 use pin_project_lite::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
@@ -57,11 +58,11 @@ use crate::{SplitReader, SplitWriter};
 ///
 /// This extractor validates the WebSocket upgrade request and provides
 /// a method to upgrade the connection.
-#[derive(Debug)]
 pub struct WebSocketUpgrade {
     key: String,
     protocol: Option<String>,
     config: Config,
+    on_upgrade: OnUpgrade,
 }
 
 impl WebSocketUpgrade {
@@ -99,11 +100,13 @@ impl WebSocketUpgrade {
         let config = self.config.clone();
         let handler_config = self.config;
         let protocol = self.protocol;
+        let on_upgrade = self.on_upgrade;
 
         WebSocketUpgradeResponse {
             accept_key,
             protocol,
             config,
+            on_upgrade,
             handler: Box::new(move |stream| {
                 let ws = WebSocket::new(stream, handler_config);
                 Box::pin(handler(ws))
@@ -111,6 +114,9 @@ impl WebSocketUpgrade {
         }
     }
 }
+
+use axum::extract::FromRequestParts;
+use axum::http::request::Parts;
 
 impl<S> FromRequestParts<S> for WebSocketUpgrade
 where
@@ -175,10 +181,17 @@ where
             .and_then(|v| v.to_str().ok())
             .map(|s| s.split(',').next().unwrap_or("").trim().to_string());
 
+        // Extract OnUpgrade from extensions (placed there by Axum/Hyper)
+        let on_upgrade = parts
+            .extensions
+            .remove::<OnUpgrade>()
+            .ok_or(WebSocketUpgradeRejection::MissingUpgrade)?;
+
         Ok(WebSocketUpgrade {
             key,
             protocol,
             config: Config::default(),
+            on_upgrade,
         })
     }
 }
@@ -194,6 +207,7 @@ pub enum WebSocketUpgradeRejection {
     MissingSecWebSocketKey,
     MissingSecWebSocketVersion,
     UnsupportedVersion,
+    MissingUpgrade,
 }
 
 impl IntoResponse for WebSocketUpgradeRejection {
@@ -209,6 +223,10 @@ impl IntoResponse for WebSocketUpgradeRejection {
                 (StatusCode::BAD_REQUEST, "Missing Sec-WebSocket-Version")
             }
             Self::UnsupportedVersion => (StatusCode::BAD_REQUEST, "Unsupported WebSocket version"),
+            Self::MissingUpgrade => (
+                StatusCode::BAD_REQUEST,
+                "Missing upgrade in request extensions",
+            ),
         };
 
         Response::builder()
@@ -227,29 +245,44 @@ pub struct WebSocketUpgradeResponse {
     accept_key: String,
     protocol: Option<String>,
     config: Config,
+    on_upgrade: OnUpgrade,
     handler: UpgradeHandler,
 }
 
 impl IntoResponse for WebSocketUpgradeResponse {
     fn into_response(self) -> Response<Body> {
+        let handler = self.handler;
+        let on_upgrade = self.on_upgrade;
+
         // Build the 101 Switching Protocols response
-        let mut builder = Response::builder()
+        let mut res = Response::builder()
             .status(StatusCode::SWITCHING_PROTOCOLS)
             .header(header::UPGRADE, "websocket")
             .header(header::CONNECTION, "Upgrade")
             .header("Sec-WebSocket-Accept", self.accept_key);
 
         if let Some(proto) = &self.protocol {
-            builder = builder.header("Sec-WebSocket-Protocol", proto.as_str());
+            res = res.header("Sec-WebSocket-Protocol", proto.as_str());
         }
 
-        // Use hyper's upgrade mechanism
+        // Spawn a task to handle the upgrade after the response is sent
+        tokio::spawn(async move {
+            match on_upgrade.await {
+                Ok(upgraded) => {
+                    // Wrap the upgraded connection with TokioIo for compatibility
+                    let io = TokioIo::new(upgraded);
+                    let stream = UpgradedStream {
+                        inner: Box::new(io),
+                    };
+                    handler(stream).await;
+                }
+                Err(e) => {
+                    eprintln!("WebSocket upgrade error: {}", e);
+                }
+            }
+        });
 
-        // Spawn the handler to run after the upgrade completes
-        // Note: In a real implementation, we'd use hyper's upgrade() here
-        // For now, we return the response and expect the handler to be called separately
-
-        builder.body(Body::empty()).unwrap()
+        res.body(Body::empty()).unwrap()
     }
 }
 
