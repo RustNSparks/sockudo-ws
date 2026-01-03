@@ -1,6 +1,6 @@
 [package]
 name = "sockudo-ws"
-version = "1.6.5"
+version = "1.6.6"
 edition = "2024"
 authors = ["Diaconu Radu-Mihai"]
 description = "Ultra-low latency WebSocket library for HFT applications"
