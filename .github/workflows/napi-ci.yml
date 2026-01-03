@@ -115,9 +115,11 @@ jobs:
         with:
           path: napi-bindings/artifacts
 
-      - name: Move artifacts
+      - name: Create npm dirs and move artifacts
         working-directory: napi-bindings
-        run: npm run artifacts
+        run: |
+          npx napi create-npm-dirs
+          npm run artifacts
 
       - name: Publish
         working-directory: napi-bindings
