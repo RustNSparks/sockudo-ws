@@ -151,6 +151,53 @@ impl WebSocketClient<Http1> {
         Ok((ws, handshake_result))
     }
 
+    /// Connect to a WebSocket server without type erasure
+    ///
+    /// This method performs the WebSocket handshake and returns a `WebSocketStream<S>`
+    /// directly, without wrapping in `Stream<Http1>`. This is useful for:
+    ///
+    /// - **io_uring**: `UringStream` uses `Rc` internally and is not `Send`
+    /// - **Single-threaded runtimes**: When `Send` is not required
+    /// - **Avoiding type erasure**: When you want to keep the concrete stream type
+    ///
+    /// # Example with io_uring
+    ///
+    /// ```ignore
+    /// use sockudo_ws::{WebSocketClient, Http1, Config};
+    /// use sockudo_ws::io_uring::UringStream;
+    ///
+    /// #[tokio_uring::main]
+    /// async fn main() {
+    ///     let tcp = tokio_uring::net::TcpStream::connect(addr).await?;
+    ///     let uring_stream = UringStream::new(tcp);
+    ///     let tls_stream = connector.connect(dnsname, uring_stream).await?;
+    ///
+    ///     let client = WebSocketClient::<Http1>::new(Config::default());
+    ///     let (ws, handshake) = client.connect_raw(tls_stream, "example.com", "/ws", None).await?;
+    ///
+    ///     // ws is WebSocketStream<TlsStream<UringStream>> - no Send required!
+    /// }
+    /// ```
+    pub async fn connect_raw<S>(
+        &self,
+        mut stream: S,
+        host: &str,
+        path: &str,
+        protocol: Option<&str>,
+    ) -> Result<(WebSocketStream<S>, HandshakeResult)>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        // Perform the HTTP/1.1 WebSocket handshake
+        let handshake_result =
+            handshake::client_handshake(&mut stream, host, path, protocol).await?;
+
+        // Create WebSocketStream directly without Stream<T> wrapper
+        let ws = WebSocketStream::from_raw(stream, Role::Client, self.config.clone());
+
+        Ok((ws, handshake_result))
+    }
+
     /// Connect to a WebSocket server using a URI
     ///
     /// This is a convenience method that establishes a TCP connection

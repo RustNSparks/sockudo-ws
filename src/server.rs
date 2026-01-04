@@ -181,6 +181,51 @@ impl WebSocketServer<Http1> {
         Ok((ws, handshake_result))
     }
 
+    /// Accept a WebSocket connection without type erasure
+    ///
+    /// This method performs the WebSocket handshake and returns a `WebSocketStream<S>`
+    /// directly, without wrapping in `Stream<Http1>`. This is useful for:
+    ///
+    /// - **io_uring**: `UringStream` uses `Rc` internally and is not `Send`
+    /// - **Single-threaded runtimes**: When `Send` is not required
+    /// - **Avoiding type erasure**: When you want to keep the concrete stream type
+    ///
+    /// # Example with io_uring
+    ///
+    /// ```ignore
+    /// use sockudo_ws::{WebSocketServer, Http1, Config};
+    /// use sockudo_ws::io_uring::UringStream;
+    ///
+    /// #[tokio_uring::main]
+    /// async fn main() {
+    ///     let listener = tokio_uring::net::TcpListener::bind(addr)?;
+    ///     let server = WebSocketServer::<Http1>::new(Config::default());
+    ///
+    ///     loop {
+    ///         let (tcp, _) = listener.accept().await?;
+    ///         let uring_stream = UringStream::new(tcp);
+    ///
+    ///         let (ws, handshake) = server.accept_raw(uring_stream).await?;
+    ///         // ws is WebSocketStream<UringStream> - no Send required!
+    ///     }
+    /// }
+    /// ```
+    pub async fn accept_raw<S>(
+        &self,
+        mut stream: S,
+    ) -> Result<(WebSocketStream<S>, HandshakeResult)>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        // Perform the HTTP/1.1 WebSocket handshake
+        let handshake_result = handshake::server_handshake(&mut stream).await?;
+
+        // Create WebSocketStream directly without Stream<T> wrapper
+        let ws = WebSocketStream::from_raw(stream, Role::Server, self.config.clone());
+
+        Ok((ws, handshake_result))
+    }
+
     /// Serve WebSocket connections from a TCP listener
     ///
     /// This is a convenience method that accepts connections from a listener
