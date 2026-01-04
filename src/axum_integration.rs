@@ -104,21 +104,30 @@ impl WebSocketUpgrade {
         let on_upgrade = self.on_upgrade;
 
         // Negotiate permessage-deflate if enabled
+        // Priority: explicit deflate config > compression mode
         #[cfg(feature = "permessage-deflate")]
-        let extensions = if let Some(ref deflate_config) = handler_config.deflate {
-            self.extensions
-                .as_deref()
-                .and_then(|ext| {
-                    crate::deflate::parse_deflate_offer(ext).map(|params| {
-                        // Parse and validate deflate parameters from the client's offer
-                        crate::deflate::DeflateConfig::from_params(&params)
-                            .ok()
-                            .map(|_| deflate_config.to_response_header())
+        let extensions = {
+            // Get deflate config from either explicit config or compression mode
+            let deflate_config = handler_config
+                .deflate
+                .clone()
+                .or_else(|| handler_config.compression.to_deflate_config());
+
+            if let Some(ref config) = deflate_config {
+                self.extensions
+                    .as_deref()
+                    .and_then(|ext| {
+                        crate::deflate::parse_deflate_offer(ext).map(|params| {
+                            // Parse and validate deflate parameters from the client's offer
+                            crate::deflate::DeflateConfig::from_params(&params)
+                                .ok()
+                                .map(|_| config.to_response_header())
+                        })
                     })
-                })
-                .flatten()
-        } else {
-            None
+                    .flatten()
+            } else {
+                None
+            }
         };
 
         #[cfg(not(feature = "permessage-deflate"))]
@@ -691,5 +700,137 @@ mod tests {
 
         // Verify the negotiation produces a valid extension header
         assert!(!response_header.is_empty());
+    }
+
+    #[cfg(feature = "permessage-deflate")]
+    #[test]
+    fn test_compression_mode_to_deflate_config() {
+        use crate::Compression;
+
+        // Test Disabled mode
+        assert!(Compression::Disabled.to_deflate_config().is_none());
+
+        // Test Dedicated mode
+        let config = Compression::Dedicated.to_deflate_config();
+        assert!(config.is_some());
+        let config = config.unwrap();
+        assert_eq!(config.server_max_window_bits, 15);
+        assert!(!config.server_no_context_takeover); // Context takeover enabled
+
+        // Test Shared mode
+        let config = Compression::Shared.to_deflate_config();
+        assert!(config.is_some());
+        let config = config.unwrap();
+        assert_eq!(config.server_max_window_bits, 15);
+
+        // Test Window256B mode (smallest window)
+        let config = Compression::Window256B.to_deflate_config();
+        assert!(config.is_some());
+        let config = config.unwrap();
+        assert_eq!(config.server_max_window_bits, 8);
+        assert!(config.server_no_context_takeover); // Context takeover disabled for small windows
+
+        // Test Window1KB mode
+        let config = Compression::Window1KB.to_deflate_config();
+        assert!(config.is_some());
+        let config = config.unwrap();
+        assert_eq!(config.server_max_window_bits, 10);
+        assert!(config.server_no_context_takeover);
+
+        // Test Window2KB mode
+        let config = Compression::Window2KB.to_deflate_config();
+        assert!(config.is_some());
+        let config = config.unwrap();
+        assert_eq!(config.server_max_window_bits, 11);
+        assert!(config.server_no_context_takeover);
+
+        // Test Window4KB mode
+        let config = Compression::Window4KB.to_deflate_config();
+        assert!(config.is_some());
+        let config = config.unwrap();
+        assert_eq!(config.server_max_window_bits, 12);
+
+        // Test Window8KB mode
+        let config = Compression::Window8KB.to_deflate_config();
+        assert!(config.is_some());
+        let config = config.unwrap();
+        assert_eq!(config.server_max_window_bits, 13);
+
+        // Test Window16KB mode
+        let config = Compression::Window16KB.to_deflate_config();
+        assert!(config.is_some());
+        let config = config.unwrap();
+        assert_eq!(config.server_max_window_bits, 14);
+
+        // Test Window32KB mode (max per RFC 7692)
+        let config = Compression::Window32KB.to_deflate_config();
+        assert!(config.is_some());
+        let config = config.unwrap();
+        assert_eq!(config.server_max_window_bits, 15);
+    }
+
+    #[cfg(feature = "permessage-deflate")]
+    #[test]
+    fn test_config_compression_mode_negotiation() {
+        use crate::Compression;
+
+        // Test that compression mode generates proper response headers
+        let client_offer = "permessage-deflate; client_max_window_bits";
+
+        for mode in [
+            Compression::Dedicated,
+            Compression::Shared,
+            Compression::Window4KB,
+            Compression::Window8KB,
+            Compression::Window16KB,
+            Compression::Window32KB,
+        ] {
+            let deflate_config = mode.to_deflate_config().unwrap();
+
+            // Parse client offer
+            let params = crate::deflate::parse_deflate_offer(client_offer);
+            assert!(params.is_some());
+
+            // Validate
+            let validated = crate::deflate::DeflateConfig::from_params(&params.unwrap());
+            assert!(validated.is_ok());
+
+            // Generate response
+            let response = deflate_config.to_response_header();
+            assert!(response.starts_with("permessage-deflate"));
+        }
+    }
+
+    #[cfg(feature = "permessage-deflate")]
+    #[test]
+    fn test_compression_priority_deflate_over_mode() {
+        use crate::Compression;
+        use crate::deflate::DeflateConfig;
+
+        // When both deflate config and compression mode are set,
+        // deflate config should take priority
+        let mut config = Config::default();
+        config.compression = Compression::Window4KB;
+        config.deflate = Some(DeflateConfig {
+            server_max_window_bits: 15,
+            client_max_window_bits: 15,
+            server_no_context_takeover: false,
+            client_no_context_takeover: false,
+            compression_level: 9,
+            compression_threshold: 16,
+        });
+
+        // Simulate the negotiation logic from on_upgrade
+        let deflate_config = config
+            .deflate
+            .clone()
+            .or_else(|| config.compression.to_deflate_config());
+
+        assert!(deflate_config.is_some());
+        let deflate_config = deflate_config.unwrap();
+
+        // Should use explicit deflate config (15 bits), not Window4KB (12 bits)
+        assert_eq!(deflate_config.server_max_window_bits, 15);
+        assert_eq!(deflate_config.compression_level, 9);
     }
 }
