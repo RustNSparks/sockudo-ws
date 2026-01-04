@@ -110,7 +110,7 @@ impl WebSocketUpgrade {
                 .as_deref()
                 .and_then(|ext| {
                     crate::deflate::parse_deflate_offer(ext).map(|params| {
-                        // Parse and negotiate deflate parameters
+                        // Parse and validate deflate parameters from the client's offer
                         crate::deflate::DeflateConfig::from_params(&params)
                             .ok()
                             .map(|_| deflate_config.to_response_header())
